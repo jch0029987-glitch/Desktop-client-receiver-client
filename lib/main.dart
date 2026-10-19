@@ -1,125 +1,152 @@
+import 'dart:io' as io;
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 void main() {
-  runApp(const MyApp());
+  runApp(const DesktopReceiverApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class DesktopReceiverApp extends StatelessWidget {
+  const DesktopReceiverApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
+      debugShowCheckedModeBanner: false,
+      title: 'Desktop Wireless Receiver',
+      theme: ThemeData.dark(useMaterial3: true).copyWith(
+        scaffoldBackgroundColor: Colors.black,
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      home: const ReceiverDashboardScreen(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class ReceiverDashboardScreen extends StatefulWidget {
+  const ReceiverDashboardScreen({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<ReceiverDashboardScreen> createState() => _ReceiverDashboardScreenState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _ReceiverDashboardScreenState extends State<ReceiverDashboardScreen> {
+  String _localIpAddress = 'Fetching IP...';
+  bool _isConnected = false;
+  io.RawDatagramSocket? _receiverSocket;
+  Uint8List? _latestFrameBytes;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void initState() {
+    super.initState();
+    _initNetworkListener();
+  }
+
+  Future<void> _initNetworkListener() async {
+    try {
+      // Find local IP address on the Wi-Fi network
+      for (var interface in await io.NetworkInterface.list()) {
+        for (var addr in interface.addresses) {
+          if (addr.type == io.InternetAddressType.IPv4 && !addr.isLoopback) {
+            setState(() {
+              _localIpAddress = addr.address;
+            });
+          }
+        }
+      }
+
+      // Bind UDP socket to listen for incoming stream packets from Pixel 9 host
+      _receiverSocket = await io.RawDatagramSocket.bind(io.InternetAddress.anyIPv4, 9876);
+      _receiverSocket?.listen((io.RawSocketEvent event) {
+        if (event == io.RawSocketEvent.read) {
+          io.Datagram? datagram = _receiverSocket?.receive();
+          if (datagram != null) {
+            setState(() {
+              _isConnected = true;
+              _latestFrameBytes = datagram.data;
+            });
+          }
+        }
+      });
+    } catch (e) {
+      debugPrint('Socket initialization error: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _receiverSocket?.close();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: (node, event) {
+          // Capture Android TV D-Pad or Bluetooth Keyboard/Mouse inputs
+          if (event is KeyDownEvent) {
+            debugPrint('Key pressed on TV receiver: ${event.logicalKey.keyLabel}');
+          }
+          return KeyEventResult.handled;
+        },
+        child: Stack(
+          children: [
+            // Stream Rendering Surface or Waiting State
+            Center(
+              child: _isConnected && _latestFrameBytes != null
+                  ? Image.memory(
+                      _latestFrameBytes!,
+                      gaplessPlayback: true,
+                      fit: BoxFit.contain,
+                    )
+                  : Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const CircularProgressIndicator(color: Colors.blueAccent),
+                        const SizedBox(height: 24),
+                        const Text(
+                          'Waiting for Pixel 9 Host Connection...',
+                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white70),
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[900],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.blueAccent.withOpacity(0.5)),
+                          ),
+                          child: Text(
+                            'Receiver IP Address: $_localIpAddress (Port: 9876)',
+                            style: const TextStyle(fontSize: 16, color: Colors.cyanAccent, fontFamily: 'monospace'),
+                          ),
+                        ),
+                      ],
+                    ),
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
+            
+            // Status HUD Overlay (Disappears when connected)
+            if (_isConnected)
+              Positioned(
+                top: 16,
+                right: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.8),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'LIVE STREAM ACTIVE',
+                    style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
