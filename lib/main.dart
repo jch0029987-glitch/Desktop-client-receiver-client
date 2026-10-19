@@ -1,7 +1,6 @@
 import 'dart:io' as io;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.v2.dart' if (dart.library.html) '' ; // standard services
 import 'package:flutter/services.dart';
 
 void main() {
